@@ -1,0 +1,119 @@
+# === OPTIONAL: Enable Tor Project Package Repository ===
+# This will allow you to install the latest version of Tor directly from the Tor Project
+
+# Step 1: Verify CPU architecture
+dpkg --print-architecture
+# Should return one of: amd64, arm64, or i386
+
+# Step 2: Install apt-transport-https
+apt install apt-transport-https -y
+
+# Step 3: Add Tor repository to APT sources
+nano /etc/apt/sources.list.d/tor.list
+# Add the following lines (replace <DISTRIBUTION> with your codename, e.g. bookworm, bullseye, etc.)
+deb     [signed-by=/usr/share/keyrings/deb.torproject.org-keyring.gpg] https://deb.torproject.org/torproject.org <DISTRIBUTION> main
+deb-src [signed-by=/usr/share/keyrings/deb.torproject.org-keyring.gpg] https://deb.torproject.org/torproject.org <DISTRIBUTION> main
+
+use this code to find out: lsb_release -c
+
+# Step 4: Install gnupg if needed
+apt install gnupg -y
+
+# Step 5: Add the GPG key
+wget -qO- https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc \
+  | gpg --dearmor | tee /usr/share/keyrings/deb.torproject.org-keyring.gpg >/dev/null
+
+# Step 6: Update and install from Tor repo
+apt update
+apt install tor deb.torproject.org-keyring -y
+
+Unattended Upgrades Configuration for Tor ===
+apt install unattended-upgrades apt-listchanges -y
+
+# Configure allowed origins
+nano /etc/apt/apt.conf.d/50unattended-upgrades
+# For Debian:
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${distro_codename},label=Debian-Security";
+    "origin=TorProject";
+};
+Unattended-Upgrade::Package-Blacklist {};
+
+# Set periodic updates
+nano /etc/apt/apt.conf.d/20auto-upgrades
+# Add:
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::AutocleanInterval "5";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::Verbose "1";
+
+# Test the unattended-upgrades setup
+unattended-upgrade --debug --dry-run
+
+# === Initial System Setup (Debian/Ubuntu) ===
+apt update && apt upgrade -y
+apt install tor nyx unattended-upgrades firewalld fail2ban logrotate -y
+systemctl enable --now tor
+systemctl enable --now firewalld
+systemctl enable --now fail2ban
+
+
+# === Tor Configuration ===
+nano /etc/tor/torrc
+ORPort 9001
+Nickname MyRelayNickname
+ContactInfo your@email.example
+ExitRelay 0
+SocksPort 0
+Log notice file /var/log/tor/notices.log
+
+systemctl restart tor
+
+# === Nyx (Tor Monitor) ===
+nyx
+# Run as root or with the same user running the Tor process.
+# Shows real-time traffic, uptime, connections, etc.
+
+# === Log Directory Setup ===
+mkdir -p /var/log/tor
+touch /var/log/tor/notices.log
+chown -R debian-tor:debian-tor /var/log/tor
+
+# === Logrotate Configuration ===
+nano /etc/logrotate.d/tor
+/var/log/tor/notices.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 debian-tor adm
+    sharedscripts
+    postrotate
+        /bin/systemctl reload tor.service > /dev/null 2>/dev/null || :
+    endscript
+}
+
+# === Firewall Configuration ===
+firewall-cmd --permanent --add-service=ssh
+firewall-cmd --permanent --add-port=9001/tcp
+firewall-cmd --reload
+
+# === Fail2Ban Configuration for SSH ===
+nano /etc/fail2ban/jail.local
+[sshd]
+enabled = true
+port = ssh
+logpath = %(sshd_log)s
+backend = systemd
+
+systemctl restart fail2ban
+
+# === Final Status Checks ===
+systemctl status tor
+systemctl status unattended-upgrades
+systemctl status firewalld
+systemctl status fail2ban
+
+

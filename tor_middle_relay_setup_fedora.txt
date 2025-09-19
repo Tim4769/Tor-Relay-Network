@@ -1,0 +1,72 @@
+# === Initial System Setup (Fedora) ===
+dnf install tor nyx dnf5-plugin-automatic firewalld fail2ban logrotate -y
+systemctl enable --now tor
+systemctl enable --now firewalld
+systemctl enable --now fail2ban
+systemctl enable --now dnf5-automatic.timer
+
+# === Auto-Update Configuration ===
+nano /etc/dnf/automatic.conf
+# Make sure these are set:
+apply_updates = yes
+emit_via = motd
+download_updates = yes
+upgrade_type = default
+
+# === Tor Configuration ===
+nano /etc/tor/torrc
+ORPort 9001
+Nickname MyRelayNickname
+ContactInfo your@email.example
+ExitRelay 0
+SocksPort 0
+Log notice file /var/log/tor/notices.log
+
+systemctl restart tor
+
+# === Nyx (Tor Monitor) ===
+nyx
+# Run as root or with the same user running the Tor process.
+# Shows real-time traffic, uptime, connections, etc.
+
+# === Log Directory Setup ===
+mkdir -p /var/log/tor
+touch /var/log/tor/notices.log
+chown -R toranon:toranon /var/log/tor
+
+# === Logrotate Configuration ===
+nano /etc/logrotate.d/tor
+/var/log/tor/notices.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 toranon toranon
+    sharedscripts
+    postrotate
+        /bin/systemctl reload tor.service > /dev/null 2>/dev/null || :
+    endscript
+}
+
+# === Firewall Configuration ===
+firewall-cmd --permanent --add-service=ssh
+firewall-cmd --permanent --add-port=9001/tcp
+firewall-cmd --reload
+
+# === Fail2Ban Configuration for SSH ===
+nano /etc/fail2ban/jail.local
+[sshd]
+enabled = true
+port = ssh
+logpath = %(sshd_log)s
+backend = systemd
+
+systemctl restart fail2ban
+
+# === Final Status Checks ===
+systemctl status tor
+systemctl status dnf5-automatic.timer
+systemctl status firewalld
+systemctl status fail2ban
